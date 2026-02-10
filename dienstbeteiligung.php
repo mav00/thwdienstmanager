@@ -15,6 +15,7 @@ function thw_dm_participation_shortcode() {
 
 	$page_url = add_query_arg( 'view', 'participation', get_permalink() );
 	$selected_service_id = isset( $_REQUEST['service_id'] ) ? intval( $_REQUEST['service_id'] ) : 0;
+	$filter_zug = isset( $_REQUEST['filter_zug'] ) ? sanitize_text_field( $_REQUEST['filter_zug'] ) : '';
 
 	ob_start();
 
@@ -28,15 +29,50 @@ function thw_dm_participation_shortcode() {
 	}
 	
 	$is_admin = current_user_can( 'administrator' );
-	$can_edit = $is_admin || $service_status !== 'closed';
+	$can_edit = $service_status !== 'closed';
 
 	// --- SPEICHERN ---
 	if ( isset( $_POST['thw_save_participation'] ) && check_admin_referer( 'thw_save_participation_nonce' ) && $can_edit ) {
 		// Sicherheitscheck: Nur speichern wenn erlaubt
 		
 		$service_id = intval( $_POST['service_id'] );
+		$posted_filter_zug = isset( $_POST['filter_zug'] ) ? sanitize_text_field( $_POST['filter_zug'] ) : '';
 		
+		// Bestehende Anwesenheit laden (für Merge bei Filterung)
+		$current_service_data = $wpdb->get_row( $wpdb->prepare( "SELECT attendance FROM $table_services WHERE id = %d", $service_id ) );
 		$attendance = array();
+		if ( $current_service_data ) {
+			$attendance = maybe_unserialize( $current_service_data->attendance );
+			if ( ! is_array( $attendance ) ) $attendance = array();
+		}
+
+		// Wenn gefiltert wurde, müssen wir die User des Filters aus dem bestehenden Array entfernen,
+		// bevor wir die neuen Daten (die den aktuellen Stand des Filters repräsentieren) hinzufügen.
+		if ( ! empty( $posted_filter_zug ) ) {
+			// Einheiten des Zugs holen
+			$zug_unit_ids = $wpdb->get_col( $wpdb->prepare( "SELECT id FROM $table_units WHERE zug = %s", $posted_filter_zug ) );
+			
+			if ( ! empty( $zug_unit_ids ) ) {
+				// User dieser Einheiten holen
+				$users_in_zug = get_users( array( 'meta_key' => 'thw_unit_id', 'meta_value' => $zug_unit_ids, 'meta_compare' => 'IN' ) );
+				
+				foreach ( $users_in_zug as $u ) {
+					$lastname = $u->last_name;
+					$firstname = $u->first_name;
+					$fullname = $u->display_name;
+					if ( ! empty( $lastname ) ) $fullname = $lastname . ( ! empty( $firstname ) ? ', ' . $firstname : '' );
+					
+					// Eintrag entfernen (wird gleich aus POST neu gesetzt, falls ausgewählt)
+					if ( isset( $attendance[ $fullname ] ) ) {
+						unset( $attendance[ $fullname ] );
+					}
+				}
+			}
+		} else {
+			// Kein Filter: Wir überschreiben alles (Clean Slate), außer wir wollen manuelle Einträge behalten?
+			// Standardverhalten war bisher Clean Slate.
+			$attendance = array();
+		}
 
 		// 1. WP-Benutzer (über ID)
 		$attendance_raw = isset( $_POST['attendance'] ) ? $_POST['attendance'] : array();
@@ -57,8 +93,13 @@ function thw_dm_participation_shortcode() {
 		// 2. Manuelle Einträge (über Name)
 		if ( isset( $_POST['attendance_manual'] ) && is_array( $_POST['attendance_manual'] ) ) {
 			foreach ( $_POST['attendance_manual'] as $name => $status ) {
-				if ( $status !== 'delete' ) {
-					$attendance[ sanitize_text_field( $name ) ] = sanitize_key( $status );
+				$clean_name = sanitize_text_field( $name );
+				if ( $status === 'delete' ) {
+					if ( isset( $attendance[ $clean_name ] ) ) {
+						unset( $attendance[ $clean_name ] );
+					}
+				} else {
+					$attendance[ $clean_name ] = sanitize_key( $status );
 				}
 			}
 		}
@@ -102,12 +143,28 @@ function thw_dm_participation_shortcode() {
 		$new_status = $_POST['thw_dm_status_action'] === 'close' ? 'closed' : 'open';
 		$wpdb->update( $table_services, array( 'status' => $new_status ), array( 'id' => $selected_service_id ) );
 		$service_status = $new_status;
-		$can_edit = $is_admin || $service_status !== 'closed'; // Status update
+		$can_edit = $service_status !== 'closed'; // Status update
 	}
 
 	// Dienste laden
 	$services = $wpdb->get_results( "SELECT * FROM $table_services ORDER BY service_date ASC" );
 	
+	// Züge laden
+	$zuege = $wpdb->get_col( "SELECT DISTINCT zug FROM $table_units ORDER BY zug ASC" );
+
+	// Dienste filtern, falls Zug gewählt
+	if ( ! empty( $filter_zug ) ) {
+		$zug_unit_ids = $wpdb->get_col( $wpdb->prepare( "SELECT id FROM $table_units WHERE zug = %s", $filter_zug ) );
+		$filtered_services = array();
+		foreach ( $services as $s ) {
+			$s_units = maybe_unserialize( $s->unit_ids );
+			if ( is_array( $s_units ) && array_intersect( $s_units, $zug_unit_ids ) ) {
+				$filtered_services[] = $s;
+			}
+		}
+		$services = $filtered_services;
+	}
+
 	// Alle Einheiten laden (für Map)
 	$all_units = $wpdb->get_results( "SELECT * FROM $table_units" );
 	$unit_name_map = array();
@@ -138,36 +195,34 @@ function thw_dm_participation_shortcode() {
 	?>
 	<div class="thw-frontend-wrapper">
 		<style>
-			.thw-frontend-wrapper { max-width: 1000px; margin: 0 auto; font-family: sans-serif; }
-			.thw-card { background: #f9f9f9; border: 1px solid #ddd; padding: 20px; margin-bottom: 20px; border-radius: 5px; }
-			.thw-btn { background: #003399; color: #fff; border: none; padding: 8px 15px; cursor: pointer; border-radius: 3px; }
-			.thw-btn:hover { background: #002266; }
-			table.thw-table { width: 100%; border-collapse: collapse; margin-top: 10px; background: #fff; }
-			table.thw-table th, table.thw-table td { text-align: left; padding: 10px; border-bottom: 1px solid #eee; }
-			table.thw-table th { background: #eee; }
-			select { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 3px; }
-			.thw-table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 15px; }
-			
-			/* Status Buttons */
-			.thw-status-buttons { display: flex; gap: 5px; flex-wrap: wrap; }
-			.status-btn { display: inline-block; width: 34px; height: 34px; cursor: pointer; margin: 0; position: relative; }
-			.status-btn input { position: absolute; opacity: 0; cursor: pointer; height: 0; width: 0; }
-			.status-btn span { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; border: 1px solid #ccc; border-radius: 4px; background: #f8f9fa; font-weight: bold; color: #555; font-size: 1.1em; transition: all 0.2s; }
-			.status-btn:hover span { background: #e2e6ea; }
-			
-			.status-btn.btn-present input:checked + span { background-color: #28a745; color: #fff; border-color: #28a745; } /* X - Grün */
-			.status-btn.btn-leave input:checked + span { background-color: #ffc107; color: #212529; border-color: #ffc107; } /* E - Gelb */
-			.status-btn.btn-sick input:checked + span { background-color: #ffc107; color: #212529; border-color: #ffc107; } /* K - Gelb */
-			.status-btn.btn-unexcused input:checked + span { background-color: #dc3545; color: #fff; border-color: #dc3545; } /* U - Rot */
-			.status-btn.btn-delete input:checked + span { background-color: #343a40; color: #fff; border-color: #343a40; } /* Löschen */
-			.status-btn input:disabled + span { opacity: 0.5; cursor: not-allowed; }
+			.thw-card label.thw-radio-wrapper { display: inline-block; margin-right: 2px; cursor: pointer; position: relative; margin-bottom: 0; }
+			.thw-radio-wrapper input { position: absolute; opacity: 0; cursor: pointer; height: 0; width: 0; }
+			.thw-icon {
+				display: inline-block; width: 28px; height: 28px; line-height: 26px;
+				text-align: center; border: 1px solid #ccc; border-radius: 4px;
+				background: #fff; color: #555; font-weight: bold; font-size: 13px;
+				box-sizing: border-box; transition: all 0.2s;
+			}
+			.thw-radio-wrapper input:checked + .thw-icon.status-present { background-color: #28a745; color: #fff; border-color: #1e7e34; }
+			.thw-radio-wrapper input:checked + .thw-icon.status-leave { background-color: #ffc107; color: #212529; border-color: #d39e00; }
+			.thw-radio-wrapper input:checked + .thw-icon.status-sick { background-color: #ffc107; color: #212529; border-color: #d39e00; }
+			.thw-radio-wrapper input:checked + .thw-icon.status-unexcused { background-color: #dc3545; color: #fff; border-color: #bd2130; }
+			.thw-radio-wrapper:hover .thw-icon { border-color: #999; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
 
-			/* Mobile Optimierung: Kartenansicht statt Tabelle */
+			/* Mobile Optimierung: Tabelle mehrzeilig anzeigen */
 			@media (max-width: 600px) {
-				table.thw-table thead { display: none; }
-				table.thw-table tr { display: block; margin-bottom: 15px; border: 1px solid #ddd; background: #fff; padding: 10px; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-				table.thw-table td { display: block; padding: 5px 0; border: none; }
-				table.thw-table td:first-child { font-weight: bold; font-size: 1.1em; border-bottom: 1px solid #eee; margin-bottom: 5px; padding-bottom: 5px; }
+				.thw-table thead { display: none; }
+				.thw-table tr { display: block; margin-bottom: 15px; border: 1px solid #ddd; background: #fff; border-radius: 5px; }
+				.thw-table td { display: block; padding: 10px; border: none; }
+				
+				/* Name und Status in einer Zeile */
+				.thw-table td:nth-child(1) { display: inline-block; width: auto; font-weight: bold; padding-right: 5px; }
+				.thw-table td:nth-child(2):not(:last-child) { display: inline-block; width: auto; padding-left: 0; color: #666; }
+				
+				/* Radio Buttons / Aktionen immer in neuer Zeile mit Trennlinie */
+				.thw-table td:last-child { display: block; width: 100%; border-top: 1px solid #eee; padding-top: 10px; }
+				
+				.thw-table select, .thw-table input[type="text"] { width: 100%; box-sizing: border-box; }
 			}
 		</style>
 
@@ -175,15 +230,28 @@ function thw_dm_participation_shortcode() {
 		<div class="thw-card">
 			<form method="get" action="<?php echo esc_url( $page_url ); ?>">
 				<input type="hidden" name="view" value="participation">
-				<label style="font-weight:bold; display:block; margin-bottom:5px;">Dienst auswählen:</label>
-				<select name="service_id" onchange="this.form.submit()">
-					<option value="">-- Bitte wählen --</option>
-					<?php foreach ( $services as $s ) : ?>
-						<option value="<?php echo $s->id; ?>" <?php selected( $selected_service_id, $s->id ); ?>>
-							<?php echo date_i18n( 'd.m.Y', strtotime( $s->service_date ) ) . ' - ' . esc_html( $s->name ); ?>
-						</option>
-					<?php endforeach; ?>
-				</select>
+				<div class="thw-flex">
+					<div class="thw-col">
+						<label for="filter_zug">Zug filtern:</label>
+						<select name="filter_zug" id="filter_zug" onchange="this.form.submit()">
+							<option value="">-- Alle Züge --</option>
+							<?php foreach ( $zuege as $z ) : ?>
+								<option value="<?php echo esc_attr( $z ); ?>" <?php selected( $filter_zug, $z ); ?>><?php echo esc_html( $z ); ?></option>
+							<?php endforeach; ?>
+						</select>
+					</div>
+					<div class="thw-col">
+						<label for="service_select">Dienst auswählen:</label>
+						<select name="service_id" id="service_select" onchange="this.form.submit()">
+							<option value="">-- Bitte wählen --</option>
+							<?php foreach ( $services as $s ) : ?>
+								<option value="<?php echo $s->id; ?>" <?php selected( $selected_service_id, $s->id ); ?>>
+									<?php echo date_i18n( 'd.m.Y', strtotime( $s->service_date ) ) . ' - ' . esc_html( $s->name ); ?>
+								</option>
+							<?php endforeach; ?>
+						</select>
+					</div>
+				</div>
 			</form>
 		</div>
 
@@ -273,10 +341,13 @@ function thw_dm_participation_shortcode() {
 					<?php wp_nonce_field( 'thw_save_participation_nonce' ); ?>
 					<input type="hidden" name="thw_save_participation" value="1">
 					<input type="hidden" name="service_id" value="<?php echo $selected_service_id; ?>">
+					<input type="hidden" name="filter_zug" value="<?php echo esc_attr( $filter_zug ); ?>">
 
 					<?php foreach ( $unit_ids as $uid ) : 
 						$unit = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $table_units WHERE id = %d", $uid ) );
 						if ( ! $unit ) continue;
+
+						if ( ! empty( $filter_zug ) && $unit->zug !== $filter_zug ) continue;
 
 						// Benutzer dieser Einheit holen
 						$users = get_users( array( 
@@ -305,7 +376,7 @@ function thw_dm_participation_shortcode() {
 							<?php else : ?>
 								<div class="thw-table-wrapper">
 								<table class="thw-table">
-									<thead><tr><th>Name</th><th>Status (Abwesenheit)</th><th style="text-align:left;">Beteiligung</th></tr></thead>
+									<thead><tr><th>Name</th><th>Abwesenheit&nbsp;</th><th style="text-align:left;">Beteiligung</th></tr></thead>
 									<tbody>
 										<?php foreach ( $users as $user ) : 
 											// Prüfen ob Abwesend an diesem Tag
@@ -329,13 +400,11 @@ function thw_dm_participation_shortcode() {
 										<tr style="<?php echo $is_absent ? 'background-color:#fff5f5;' : ''; ?>">
 											<td><?php echo esc_html( $fullname ); ?></td>
 											<td><?php echo $status_html; ?></td>
-											<td style="text-align:left;">
-												<div class="thw-status-buttons">
-													<label class="status-btn btn-present" title="Anwesend"><input type="radio" name="attendance[<?php echo $user->ID; ?>]" value="present" <?php checked( $current_status, 'present' ); ?> <?php disabled( ! $can_edit ); ?>><span>X</span></label>
-													<label class="status-btn btn-leave" title="Entschuldigt / Beurlaubt"><input type="radio" name="attendance[<?php echo $user->ID; ?>]" value="leave" <?php checked( $current_status, 'leave' ); ?> <?php disabled( ! $can_edit ); ?>><span>E</span></label>
-													<label class="status-btn btn-sick" title="Krank"><input type="radio" name="attendance[<?php echo $user->ID; ?>]" value="sick" <?php checked( $current_status, 'sick' ); ?> <?php disabled( ! $can_edit ); ?>><span>K</span></label>
-													<label class="status-btn btn-unexcused" title="Unentschuldigt"><input type="radio" name="attendance[<?php echo $user->ID; ?>]" value="unexcused" <?php checked( $current_status, 'unexcused' ); ?> <?php disabled( ! $can_edit ); ?>><span>U</span></label>
-												</div>
+											<td style="text-align:left; white-space:nowrap;">
+												<label class="thw-radio-wrapper" title="Anwesend"><input type="radio" name="attendance[<?php echo $user->ID; ?>]" value="present" <?php checked( $current_status, 'present' ); ?> <?php disabled( ! $can_edit ); ?>><span class="thw-icon status-present">X</span></label>
+												<label class="thw-radio-wrapper" title="Entschuldigt"><input type="radio" name="attendance[<?php echo $user->ID; ?>]" value="leave" <?php checked( $current_status, 'leave' ); ?> <?php disabled( ! $can_edit ); ?>><span class="thw-icon status-leave">E</span></label>
+												<label class="thw-radio-wrapper" title="Krank"><input type="radio" name="attendance[<?php echo $user->ID; ?>]" value="sick" <?php checked( $current_status, 'sick' ); ?> <?php disabled( ! $can_edit ); ?>><span class="thw-icon status-sick">K</span></label>
+												<label class="thw-radio-wrapper" title="Unentschuldigt"><input type="radio" name="attendance[<?php echo $user->ID; ?>]" value="unexcused" <?php checked( $current_status, 'unexcused' ); ?> <?php disabled( ! $can_edit ); ?>><span class="thw-icon status-unexcused">U</span></label>
 											</td>
 										</tr>
 										<?php endforeach; ?>
@@ -385,16 +454,14 @@ function thw_dm_participation_shortcode() {
 												<?php echo esc_html( $name ); ?>
 												<?php echo $extra_info; ?>
 											</td>
-											<td style="text-align:left;">
-												<div class="thw-status-buttons">
-													<label class="status-btn btn-present" title="Anwesend"><input type="radio" name="attendance_manual[<?php echo esc_attr( $name ); ?>]" value="present" <?php checked( $status, 'present' ); ?> <?php disabled( ! $can_edit ); ?>><span>X</span></label>
-													<label class="status-btn btn-leave" title="Entschuldigt / Beurlaubt"><input type="radio" name="attendance_manual[<?php echo esc_attr( $name ); ?>]" value="leave" <?php checked( $status, 'leave' ); ?> <?php disabled( ! $can_edit ); ?>><span>E</span></label>
-													<label class="status-btn btn-sick" title="Krank"><input type="radio" name="attendance_manual[<?php echo esc_attr( $name ); ?>]" value="sick" <?php checked( $status, 'sick' ); ?> <?php disabled( ! $can_edit ); ?>><span>K</span></label>
-													<label class="status-btn btn-unexcused" title="Unentschuldigt"><input type="radio" name="attendance_manual[<?php echo esc_attr( $name ); ?>]" value="unexcused" <?php checked( $status, 'unexcused' ); ?> <?php disabled( ! $can_edit ); ?>><span>U</span></label>
-													<?php if ( $can_edit ) : ?>
-														<label class="status-btn btn-delete" title="Löschen"><input type="radio" name="attendance_manual[<?php echo esc_attr( $name ); ?>]" value="delete"><span>🗑</span></label>
-													<?php endif; ?>
-												</div>
+											<td style="text-align:left; white-space:nowrap;">
+												<label class="thw-radio-wrapper" title="Anwesend"><input type="radio" name="attendance_manual[<?php echo esc_attr( $name ); ?>]" value="present" <?php checked( $status, 'present' ); ?> <?php disabled( ! $can_edit ); ?>><span class="thw-icon status-present">X</span></label>
+												<label class="thw-radio-wrapper" title="Entschuldigt"><input type="radio" name="attendance_manual[<?php echo esc_attr( $name ); ?>]" value="leave" <?php checked( $status, 'leave' ); ?> <?php disabled( ! $can_edit ); ?>><span class="thw-icon status-leave">E</span></label>
+												<label class="thw-radio-wrapper" title="Krank"><input type="radio" name="attendance_manual[<?php echo esc_attr( $name ); ?>]" value="sick" <?php checked( $status, 'sick' ); ?> <?php disabled( ! $can_edit ); ?>><span class="thw-icon status-sick">K</span></label>
+												<label class="thw-radio-wrapper" title="Unentschuldigt"><input type="radio" name="attendance_manual[<?php echo esc_attr( $name ); ?>]" value="unexcused" <?php checked( $status, 'unexcused' ); ?> <?php disabled( ! $can_edit ); ?>><span class="thw-icon status-unexcused">U</span></label>
+												<?php if ( $can_edit ) : ?>
+													<label class="thw-radio-wrapper" title="Löschen" style="vertical-align:top; margin-left:5px;"><input type="radio" name="attendance_manual[<?php echo esc_attr( $name ); ?>]" value="delete"><span class="thw-icon" style="color:#a00; border-color:#a00;">🗑</span></label>
+												<?php endif; ?>
 											</td>
 										</tr>
 									<?php endforeach; ?>

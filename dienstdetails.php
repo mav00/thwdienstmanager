@@ -19,14 +19,24 @@ function thw_dm_frontend_shortcode() {
 
 	// 1. Dienst auswählen oder aus Post-Daten holen
 	$selected_service_id = isset( $_REQUEST['service_id'] ) ? intval( $_REQUEST['service_id'] ) : 0;
+	$filter_zug = isset( $_REQUEST['filter_zug'] ) ? sanitize_text_field( $_REQUEST['filter_zug'] ) : '';
 
 	// --- SPEICHERN LOGIK ---
 	if ( isset( $_POST['thw_dm_save_details_nonce'] ) && wp_verify_nonce( $_POST['thw_dm_save_details_nonce'], 'save_service_details' ) ) {
 		if ( $selected_service_id > 0 && isset( $_POST['details'] ) && is_array( $_POST['details'] ) ) {
 			
-			// Zuerst alte Einträge für diesen Dienst löschen (Clean Slate Ansatz)
-			// Man könnte dies verfeinern, aber für dieses Szenario ist es am sichersten, um Duplikate zu vermeiden.
-			$wpdb->delete( $table_details, array( 'service_id' => $selected_service_id ) );
+			// Lösch-Logik abhängig vom Filter
+			if ( ! empty( $filter_zug ) ) {
+				// Nur Einträge für Einheiten dieses Zugs löschen
+				$zug_unit_ids = $wpdb->get_col( $wpdb->prepare( "SELECT id FROM $table_units WHERE zug = %s", $filter_zug ) );
+				if ( ! empty( $zug_unit_ids ) ) {
+					$placeholders = implode( ',', array_fill( 0, count( $zug_unit_ids ), '%d' ) );
+					$wpdb->query( $wpdb->prepare( "DELETE FROM $table_details WHERE service_id = %d AND unit_id IN ($placeholders)", array_merge( array( $selected_service_id ), $zug_unit_ids ) ) );
+				}
+			} else {
+				// Keine Filterung: Alle Einträge für diesen Dienst löschen (Clean Slate)
+				$wpdb->delete( $table_details, array( 'service_id' => $selected_service_id ) );
+			}
 
 			// Neue Einträge speichern
 			foreach ( $_POST['details'] as $unit_id => $entries ) {
@@ -57,44 +67,51 @@ function thw_dm_frontend_shortcode() {
 	// Alle Dienste für das Dropdown laden (chronologisch)
 	$services = $wpdb->get_results( "SELECT * FROM $table_services ORDER BY service_date ASC" );
 
+	// Züge laden
+	$zuege = $wpdb->get_col( "SELECT DISTINCT zug FROM $table_units ORDER BY zug ASC" );
+
+	// Dienste filtern, falls Zug gewählt
+	if ( ! empty( $filter_zug ) ) {
+		$zug_unit_ids = $wpdb->get_col( $wpdb->prepare( "SELECT id FROM $table_units WHERE zug = %s", $filter_zug ) );
+		$filtered_services = array();
+		foreach ( $services as $s ) {
+			$s_units = maybe_unserialize( $s->unit_ids );
+			if ( is_array( $s_units ) && array_intersect( $s_units, $zug_unit_ids ) ) {
+				$filtered_services[] = $s;
+			}
+		}
+		$services = $filtered_services;
+	}
+
 	?>
 	<div class="thw-frontend-wrapper">
-		<style>
-			.thw-frontend-wrapper { max-width: 1000px; margin: 0 auto; font-family: sans-serif; }
-			.thw-card { background: #f9f9f9; border: 1px solid #ddd; padding: 20px; margin-bottom: 20px; border-radius: 5px; }
-			.thw-unit-section { background: #fff; border: 1px solid #eee; padding: 15px; margin-bottom: 15px; border-left: 5px solid #003399; }
-			.thw-entry-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #eee; }
-			.thw-field { flex: 1; min-width: 150px; }
-			.thw-field label { display: block; font-size: 0.85em; margin-bottom: 3px; font-weight: bold; }
-			.thw-field input, .thw-field textarea { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 3px; box-sizing: border-box; }
-			.thw-btn { background: #003399; color: #fff; border: none; padding: 8px 15px; cursor: pointer; border-radius: 3px; }
-			.thw-btn:hover { background: #002266; }
-			.thw-btn.add-row { background: #eee; color: #333; border: 1px solid #ccc; font-size: 0.9em; }
-			.thw-btn.add-row:hover { background: #ddd; }
-			.thw-message { padding: 10px; margin-bottom: 20px; border-radius: 3px; }
-			.thw-message.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-			
-			/* Mobile Optimierung */
-			@media (max-width: 600px) {
-				.thw-entry-row { flex-direction: column; align-items: stretch; }
-				.thw-field { flex: 1 1 100% !important; width: 100%; }
-			}
-		</style>
 
 		<!-- AUSWAHL DES DIENSTES -->
 		<div class="thw-card">
 			<form method="get" action="<?php echo esc_url( add_query_arg( 'view', 'services', get_permalink() ) ); ?>">
 				<input type="hidden" name="view" value="services">
-				<label for="service_select"><strong>Dienst auswählen:</strong></label>
-				<select name="service_id" id="service_select" onchange="this.form.submit()">
-					<option value="">-- Bitte wählen --</option>
-					<?php foreach ( $services as $s ) : ?>
-						<option value="<?php echo $s->id; ?>" <?php selected( $selected_service_id, $s->id ); ?>>
-							<?php echo date_i18n( 'd.m.Y', strtotime( $s->service_date ) ) . ' - ' . esc_html( $s->name ); ?>
-						</option>
-					<?php endforeach; ?>
-				</select>
-				<noscript><button type="submit" class="thw-btn">Laden</button></noscript>
+				<div class="thw-flex">
+					<div class="thw-col">
+						<label for="filter_zug">Zug filtern:</label>
+						<select name="filter_zug" id="filter_zug" onchange="this.form.submit()">
+							<option value="">-- Alle Züge --</option>
+							<?php foreach ( $zuege as $z ) : ?>
+								<option value="<?php echo esc_attr( $z ); ?>" <?php selected( $filter_zug, $z ); ?>><?php echo esc_html( $z ); ?></option>
+							<?php endforeach; ?>
+						</select>
+					</div>
+					<div class="thw-col">
+						<label for="service_select">Dienst auswählen:</label>
+						<select name="service_id" id="service_select" onchange="this.form.submit()">
+							<option value="">-- Bitte wählen --</option>
+							<?php foreach ( $services as $s ) : ?>
+								<option value="<?php echo $s->id; ?>" <?php selected( $selected_service_id, $s->id ); ?>>
+									<?php echo date_i18n( 'd.m.Y', strtotime( $s->service_date ) ) . ' - ' . esc_html( $s->name ); ?>
+								</option>
+							<?php endforeach; ?>
+						</select>
+					</div>
+				</div>
 			</form>
 		</div>
 
@@ -113,7 +130,7 @@ function thw_dm_frontend_shortcode() {
 				echo '<div class="thw-message success">Status geändert: ' . ($new_status == 'closed' ? 'Abgeschlossen' : 'Geöffnet') . '</div>';
 			}
 
-			$can_edit = $is_admin || $service_status !== 'closed';
+			$can_edit = $service_status !== 'closed';
 
 			// Einheiten dieses Dienstes ermitteln
 			$assigned_unit_ids = maybe_unserialize( $current_service->unit_ids );
@@ -151,11 +168,14 @@ function thw_dm_frontend_shortcode() {
 				<form method="post">
 					<?php wp_nonce_field( 'save_service_details', 'thw_dm_save_details_nonce' ); ?>
 					<input type="hidden" name="service_id" value="<?php echo $selected_service_id; ?>">
+					<input type="hidden" name="filter_zug" value="<?php echo esc_attr( $filter_zug ); ?>">
 
 					<?php foreach ( $assigned_unit_ids as $uid ) : 
 						$unit = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $table_units WHERE id = %d", $uid ) );
 						if ( ! $unit ) continue;
 						
+						if ( ! empty( $filter_zug ) && $unit->zug !== $filter_zug ) continue;
+
 						// Vorhandene Einträge oder ein leerer Eintrag als Start
 						$unit_entries = isset( $details_by_unit[ $uid ] ) ? $details_by_unit[ $uid ] : array();
 						if ( empty( $unit_entries ) ) {

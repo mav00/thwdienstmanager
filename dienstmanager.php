@@ -1,10 +1,10 @@
 <?php
 /**
  * Plugin Name:       THW Dienste Manager
- * Plugin URI:        https://deine-website.de/
+ * Plugin URI:        thw-muenchen-mitte.de
  * Description:       Ein Plugin zur Verwaltung von THW Diensten, Helfern und Anwesenheiten.
  * Version:           1.0.0
- * Author:            Dein Name
+ * Author:            Matthias Verwold
  * Text Domain:       thw-dienst-manager
  * Domain Path:       /languages
  */
@@ -19,6 +19,7 @@ require_once plugin_dir_path( __FILE__ ) . 'dienstdetails.php';
 require_once plugin_dir_path( __FILE__ ) . 'Abwesenheiten.php';
 require_once plugin_dir_path( __FILE__ ) . 'dienstbeteiligung.php';
 require_once plugin_dir_path( __FILE__ ) . 'stammdaten.php';
+require_once plugin_dir_path( __FILE__ ) . 'auswertungen.php';
 
 /**
  * Haupt-Shortcode [thw_frontend]
@@ -42,6 +43,7 @@ function thw_dm_main_frontend_shortcode() {
 	$url_absences = add_query_arg( 'view', 'absences', get_permalink() );
 	$url_participation = add_query_arg( 'view', 'participation', get_permalink() );
 	$url_stammdaten = add_query_arg( 'view', 'stammdaten', get_permalink() );
+	$url_evaluation = add_query_arg( 'view', 'evaluation', get_permalink() );
 	
 	ob_start();
 	?>
@@ -62,7 +64,22 @@ function thw_dm_main_frontend_shortcode() {
 		}
 		.thw-tab-item.active { background: #fff; color: #003399; border-top: 3px solid #003399; border-bottom: 1px solid #fff; }
 		.thw-tab-item:hover { background: #eee; }
+
+		/* Globale Frontend Stile */
+		.thw-frontend-wrapper { max-width: 1000px; margin: 0 auto; }
+		.thw-card { background: #f9f9f9; border: 1px solid #ddd; padding: 20px; margin-bottom: 20px; border-radius: 5px; }
+		.thw-card select { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 3px; background-color: #fff; }
+		.thw-btn { background: #003399; color: #fff; border: none; padding: 8px 15px; cursor: pointer; border-radius: 3px; text-decoration: none; display: inline-block; }
+		.thw-btn:hover { background: #002266; color: #fff; }
+		.thw-message { padding: 15px; margin-bottom: 20px; border-radius: 5px; border: 1px solid; }
+		.thw-message.success { background-color: #d4edda; color: #155724; border-color: #c3e6cb; }
+		.thw-message.error { background-color: #f8d7da; color: #721c24; border-color: #f5c6cb; }
 		
+		.thw-flex { display: flex; gap: 15px; flex-wrap: wrap; }
+		.thw-col { flex: 1; min-width: 200px; }
+		.thw-card label { font-weight: bold; display: block; margin-bottom: 5px; }
+		@media (max-width: 600px) { .thw-col { flex: 1 1 100%; } }
+
 		/* Mobile Optimierung für Tabs */
 		@media (max-width: 768px) {
 			.thw-tabs { display: block; border-bottom: none; gap: 0; }
@@ -75,6 +92,7 @@ function thw_dm_main_frontend_shortcode() {
 			<a href="<?php echo esc_url( $url_absences ); ?>" class="thw-tab-item <?php echo $view === 'absences' ? 'active' : ''; ?>">Abwesenheiten</a>
 			<a href="<?php echo esc_url( $url_services ); ?>" class="thw-tab-item <?php echo $view === 'services' ? 'active' : ''; ?>">Dienst Ausbildungsthemen</a>
 			<a href="<?php echo esc_url( $url_participation ); ?>" class="thw-tab-item <?php echo $view === 'participation' ? 'active' : ''; ?>">Dienstbeteiligung</a>
+			<a href="<?php echo esc_url( $url_evaluation ); ?>" class="thw-tab-item <?php echo $view === 'evaluation' ? 'active' : ''; ?>">Auswertungen</a>
 			<?php if ( $is_admin ) : ?>
 				<a href="<?php echo esc_url( $url_stammdaten ); ?>" class="thw-tab-item <?php echo $view === 'stammdaten' ? 'active' : ''; ?>">Stammdaten</a>
 			<?php endif; ?>
@@ -86,6 +104,8 @@ function thw_dm_main_frontend_shortcode() {
 				echo thw_dm_absences_shortcode();
 			} elseif ( $view === 'participation' ) {
 				echo thw_dm_participation_shortcode();
+			} elseif ( $view === 'evaluation' ) {
+				echo thw_dm_evaluation_shortcode();
 			} elseif ( $view === 'stammdaten' && $is_admin ) {
 				echo thw_dm_stammdaten_shortcode();
 			} else {
