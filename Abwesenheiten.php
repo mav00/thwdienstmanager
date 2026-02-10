@@ -53,17 +53,36 @@ function thw_dm_absences_shortcode() {
 
 	// --- DATEN LADEN ---
 	// Filter-Status
+	$filter_zug = isset( $_REQUEST['filter_zug'] ) ? sanitize_text_field( $_REQUEST['filter_zug'] ) : '';
 	$filter_unit_id = isset( $_REQUEST['filter_unit'] ) ? intval( $_REQUEST['filter_unit'] ) : 0;
 	$selected_user_id = isset( $_REQUEST['selected_user'] ) ? intval( $_REQUEST['selected_user'] ) : 0;
 
-	// Einheiten laden
-	$units = $wpdb->get_results( "SELECT * FROM $table_units ORDER BY zug ASC, bezeichnung ASC" );
+	// Züge laden
+	$zuege = $wpdb->get_col( "SELECT DISTINCT zug FROM $table_units ORDER BY zug ASC" );
+
+	// Einheiten laden (ggf. nach Zug gefiltert)
+	$sql_units = "SELECT * FROM $table_units";
+	if ( ! empty( $filter_zug ) ) {
+		$sql_units .= $wpdb->prepare( " WHERE zug = %s", $filter_zug );
+	}
+	$sql_units .= " ORDER BY zug ASC, bezeichnung ASC";
+	$units = $wpdb->get_results( $sql_units );
 
 	// Benutzer laden (ggf. gefiltert)
 	$user_args = array();
 	if ( $filter_unit_id > 0 ) {
 		$user_args['meta_key']   = 'thw_unit_id';
 		$user_args['meta_value'] = $filter_unit_id;
+	} elseif ( ! empty( $filter_zug ) ) {
+		// Alle Einheiten dieses Zugs holen
+		$zug_unit_ids = $wpdb->get_col( $wpdb->prepare( "SELECT id FROM $table_units WHERE zug = %s", $filter_zug ) );
+		if ( ! empty( $zug_unit_ids ) ) {
+			$user_args['meta_key']     = 'thw_unit_id';
+			$user_args['meta_value']   = $zug_unit_ids;
+			$user_args['meta_compare'] = 'IN';
+		} else {
+			$user_args['include'] = array( 0 ); // Keine Ergebnisse
+		}
 	}
 	$users = get_users( $user_args );
 	
@@ -134,6 +153,17 @@ function thw_dm_absences_shortcode() {
 				<input type="hidden" name="view" value="absences">
 				<div class="thw-flex">
 					<div class="thw-col">
+						<label for="filter_zug">Zug filtern:</label>
+						<select name="filter_zug" id="filter_zug" onchange="this.form.submit()">
+							<option value="">-- Alle Züge --</option>
+							<?php foreach ( $zuege as $z ) : ?>
+								<option value="<?php echo esc_attr( $z ); ?>" <?php selected( $filter_zug, $z ); ?>>
+									<?php echo esc_html( $z ); ?>
+								</option>
+							<?php endforeach; ?>
+						</select>
+					</div>
+					<div class="thw-col">
 						<label for="filter_unit">Einheit filtern:</label>
 						<select name="filter_unit" id="filter_unit" onchange="this.form.submit()">
 							<option value="0">-- Alle Einheiten --</option>
@@ -168,6 +198,7 @@ function thw_dm_absences_shortcode() {
 					<input type="hidden" name="thw_save_absence" value="1">
 					<input type="hidden" name="selected_user" value="<?php echo $selected_user_id; ?>">
 					<input type="hidden" name="filter_unit" value="<?php echo $filter_unit_id; ?>">
+					<input type="hidden" name="filter_zug" value="<?php echo esc_attr( $filter_zug ); ?>">
 					<input type="hidden" name="abs_id" value="<?php echo $edit_entry ? $edit_entry->id : 0; ?>">
 
 					<div class="thw-flex" style="align-items: flex-end;">
@@ -186,7 +217,7 @@ function thw_dm_absences_shortcode() {
 						<div class="thw-col" style="flex: 0 0 auto;">
 							<button type="submit" class="thw-btn"><?php echo $edit_entry ? 'Änderung speichern' : 'Hinzufügen'; ?></button>
 							<?php if ( $edit_entry ) : ?>
-								<a href="<?php echo esc_url( add_query_arg( array( 'selected_user' => $selected_user_id, 'filter_unit' => $filter_unit_id ), $page_url ) ); ?>" class="thw-btn" style="background:#ccc; color:#333;">Abbrechen</a>
+								<a href="<?php echo esc_url( add_query_arg( array( 'selected_user' => $selected_user_id, 'filter_unit' => $filter_unit_id, 'filter_zug' => $filter_zug ), $page_url ) ); ?>" class="thw-btn" style="background:#ccc; color:#333;">Abbrechen</a>
 							<?php endif; ?>
 						</div>
 					</div>
@@ -208,8 +239,8 @@ function thw_dm_absences_shortcode() {
 									<td><?php echo date_i18n( 'd.m.Y', strtotime( $abs->end_date ) ); ?></td>
 									<td><?php echo esc_html( $abs->reason ); ?></td>
 									<td>
-										<a href="<?php echo esc_url( add_query_arg( array( 'action' => 'edit', 'abs_id' => $abs->id, 'selected_user' => $selected_user_id, 'filter_unit' => $filter_unit_id ), $page_url ) ); ?>">Bearbeiten</a> | 
-										<a href="<?php echo esc_url( wp_nonce_url( add_query_arg( array( 'action' => 'delete', 'abs_id' => $abs->id, 'selected_user' => $selected_user_id, 'filter_unit' => $filter_unit_id ), $page_url ), 'delete_absence_' . $abs->id ) ); ?>" style="color:#a00;" onclick="return confirm('Löschen?');">Löschen</a>
+										<a href="<?php echo esc_url( add_query_arg( array( 'action' => 'edit', 'abs_id' => $abs->id, 'selected_user' => $selected_user_id, 'filter_unit' => $filter_unit_id, 'filter_zug' => $filter_zug ), $page_url ) ); ?>">Bearbeiten</a> | 
+										<a href="<?php echo esc_url( wp_nonce_url( add_query_arg( array( 'action' => 'delete', 'abs_id' => $abs->id, 'selected_user' => $selected_user_id, 'filter_unit' => $filter_unit_id, 'filter_zug' => $filter_zug ), $page_url ), 'delete_absence_' . $abs->id ) ); ?>" style="color:#a00;" onclick="return confirm('Löschen?');">Löschen</a>
 									</td>
 								</tr>
 							<?php endforeach; ?>
@@ -221,7 +252,7 @@ function thw_dm_absences_shortcode() {
 		<?php else : ?>
 			<!-- 3. ÜBERSICHT (Wenn kein User gewählt) -->
 			<div class="thw-card">
-				<h3><?php echo $filter_unit_id > 0 ? 'Alle Abwesenheiten in dieser Einheit' : 'Alle Abwesenheiten (Gesamtübersicht)'; ?></h3>
+				<h3><?php echo $filter_unit_id > 0 ? 'Alle Abwesenheiten in dieser Einheit' : ( ! empty( $filter_zug ) ? 'Alle Abwesenheiten in diesem Zug' : 'Alle Abwesenheiten (Gesamtübersicht)' ); ?></h3>
 				<?php
 				$unit_user_ids = array_keys( $user_names );
 				$unit_absences = array();
@@ -249,8 +280,8 @@ function thw_dm_absences_shortcode() {
 									<td><?php echo date_i18n( 'd.m.Y', strtotime( $abs->end_date ) ); ?></td>
 									<td><?php echo esc_html( $abs->reason ); ?></td>
 									<td>
-										<a href="<?php echo esc_url( add_query_arg( array( 'action' => 'edit', 'abs_id' => $abs->id, 'selected_user' => $abs->user_id, 'filter_unit' => $filter_unit_id ), $page_url ) ); ?>">Bearbeiten</a> | 
-										<a href="<?php echo esc_url( wp_nonce_url( add_query_arg( array( 'action' => 'delete', 'abs_id' => $abs->id, 'selected_user' => 0, 'filter_unit' => $filter_unit_id ), $page_url ), 'delete_absence_' . $abs->id ) ); ?>" style="color:#a00;" onclick="return confirm('Löschen?');">Löschen</a>
+										<a href="<?php echo esc_url( add_query_arg( array( 'action' => 'edit', 'abs_id' => $abs->id, 'selected_user' => $abs->user_id, 'filter_unit' => $filter_unit_id, 'filter_zug' => $filter_zug ), $page_url ) ); ?>">Bearbeiten</a> | 
+										<a href="<?php echo esc_url( wp_nonce_url( add_query_arg( array( 'action' => 'delete', 'abs_id' => $abs->id, 'selected_user' => 0, 'filter_unit' => $filter_unit_id, 'filter_zug' => $filter_zug ), $page_url ), 'delete_absence_' . $abs->id ) ); ?>" style="color:#a00;" onclick="return confirm('Löschen?');">Löschen</a>
 									</td>
 								</tr>
 							<?php endforeach; ?>
