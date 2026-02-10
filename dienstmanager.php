@@ -28,7 +28,7 @@ require_once plugin_dir_path( __FILE__ ) . 'auswertungen.php';
 function thw_dm_main_frontend_shortcode() {
 	// Zugriffsschutz: Nur Admins oder Rolle 'fuehrung'
 	$user = wp_get_current_user();
-	$allowed_roles = array( 'administrator', 'fuehrung' );
+	$allowed_roles = array( 'administrator', 'editor', 'fuehrung' );
 	
 	if ( ! is_user_logged_in() || ! array_intersect( $allowed_roles, (array) $user->roles ) ) {
 		return '<div class="thw-message error" style="background:#f8d7da; color:#721c24; padding:15px; border:1px solid #f5c6cb; border-radius:5px;">' . esc_html__( 'Zugriff verweigert. Dieser Bereich ist nur für Führungskräfte zugänglich.', 'thw-dienst-manager' ) . '</div>';
@@ -189,7 +189,7 @@ function thw_dm_add_admin_menu() {
 	add_menu_page(
 		__( 'THW Manager', 'thw-dienst-manager' ),
 		__( 'THW Manager', 'thw-dienst-manager' ),
-		'manage_options',
+		'publish_pages',
 		'thw-units',
 		'thw_dm_units_page_html',
 		'dashicons-groups',
@@ -201,7 +201,7 @@ function thw_dm_add_admin_menu() {
 		'thw-units',
 		__( 'Einheiten', 'thw-dienst-manager' ),
 		__( 'Einheiten', 'thw-dienst-manager' ),
-		'manage_options',
+		'publish_pages',
 		'thw-units',
 		'thw_dm_units_page_html'
 	);
@@ -211,7 +211,7 @@ function thw_dm_add_admin_menu() {
 		'thw-units',
 		__( 'Dienste', 'thw-dienst-manager' ),
 		__( 'Dienste', 'thw-dienst-manager' ),
-		'manage_options',
+		'publish_pages',
 		'thw-services',
 		'thw_dm_services_page_html'
 	);
@@ -221,7 +221,7 @@ function thw_dm_add_admin_menu() {
 		'thw-units',
 		__( 'Benutzer Zuordnung', 'thw-dienst-manager' ),
 		__( 'Benutzer Zuordnung', 'thw-dienst-manager' ),
-		'manage_options',
+		'publish_pages',
 		'thw-users',
 		'thw_dm_users_page_html'
 	);

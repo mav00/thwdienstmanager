@@ -329,9 +329,28 @@ function thw_dm_participation_shortcode() {
 					$total_present++;
 				}
 			}
+
+			// Maximale Stärke berechnen (Alle Helfer der beteiligten Einheiten minus Abwesende)
+			$max_strength = 0;
+			if ( ! empty( $unit_ids ) && is_array( $unit_ids ) ) {
+				$service_users_ids = get_users( array( 
+					'meta_key' => 'thw_unit_id', 
+					'meta_value' => $unit_ids, 
+					'meta_compare' => 'IN',
+					'fields' => 'ID'
+				) );
+				
+				if ( ! empty( $service_users_ids ) ) {
+					$absent_ids = $wpdb->get_col( $wpdb->prepare(
+						"SELECT user_id FROM $table_absences WHERE %s BETWEEN start_date AND end_date",
+						$service->service_date
+					) );
+					$max_strength = count( array_diff( $service_users_ids, $absent_ids ) );
+				}
+			}
 			?>
 			<div class="thw-card" style="text-align:center; font-size:1.2em; padding:15px; border-left:5px solid #003399;">
-				<strong>Gesamtstärke (Anwesend): <span id="total-present-count"><?php echo intval( $total_present ); ?></span></strong>
+				<strong>Gesamtstärke (Anwesend): <span id="total-present-count"><?php echo intval( $total_present ); ?></span> / <?php echo intval( $max_strength ); ?></strong>
 			</div>
 
 			<?php
