@@ -183,7 +183,7 @@ function thw_dm_evaluation_shortcode() {
 
 										if ( $status === 'present' ) {
 											$cell_class = 'thw-status-present';
-											$cell_content = 'X';
+											$cell_content = '&#10004;';
 											$attendance_count++;
 										} elseif ( $status === 'leave' ) {
 											$cell_class = 'thw-status-leave';
@@ -210,7 +210,7 @@ function thw_dm_evaluation_shortcode() {
 				</div>
 				<div style="padding: 10px; font-size: 0.85em; color: #666; background: #f9f9f9; border-top: 1px solid #ddd;">
 					<strong>Legende:</strong> 
-					<span style="display:inline-block; width:15px; text-align:center; background:#d4edda; color:#155724; font-weight:bold; border:1px solid #ccc; margin-left:10px;">X</span> Anwesend
+					<span style="display:inline-block; width:15px; text-align:center; background:#d4edda; color:#155724; font-weight:bold; border:1px solid #ccc; margin-left:10px;">&#10004;</span> Anwesend
 					<span style="display:inline-block; width:15px; text-align:center; background:#fff3cd; color:#856404; border:1px solid #ccc; margin-left:10px;">E</span> Entschuldigt
 					<span style="display:inline-block; width:15px; text-align:center; background:#fff3cd; color:#856404; border:1px solid #ccc; margin-left:10px;">K</span> Krank
 					<span style="display:inline-block; width:15px; text-align:center; background:#dc3545; color:#fff; border:1px solid #ccc; margin-left:10px;">U</span> Unentschuldigt

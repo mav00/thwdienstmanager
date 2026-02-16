@@ -19,6 +19,21 @@ function thw_dm_participation_shortcode() {
 
 	ob_start();
 
+	$is_admin = current_user_can( 'administrator' );
+
+	// --- STATUS ÄNDERN (Admin) - Vorab ausführen ---
+	if ( isset( $_POST['thw_dm_status_action'] ) && $is_admin && check_admin_referer( 'thw_dm_status_nonce' ) ) {
+		$new_status = $_POST['thw_dm_status_action'] === 'close' ? 'closed' : 'open';
+		if ( $selected_service_id > 0 ) {
+			$result = $wpdb->update( $table_services, array( 'status' => $new_status ), array( 'id' => $selected_service_id ) );
+			if ( false === $result ) {
+				echo '<div class="thw-message error">Fehler beim Status-Update: ' . esc_html( $wpdb->last_error ) . '</div>';
+			} else {
+				echo '<div class="thw-message success">Status geändert: ' . ($new_status == 'closed' ? 'Abgeschlossen' : 'Geöffnet') . '</div>';
+			}
+		}
+	}
+
 	// Dienst laden (für Status-Check vor dem Speichern)
 	$service_status = 'open';
 	if ( $selected_service_id > 0 ) {
@@ -28,12 +43,19 @@ function thw_dm_participation_shortcode() {
 		}
 	}
 	
-	$is_admin = current_user_can( 'administrator' );
 	$can_edit = $service_status !== 'closed';
 
 	// --- SPEICHERN ---
-	if ( isset( $_POST['thw_save_participation'] ) && check_admin_referer( 'thw_save_participation_nonce' ) && $can_edit ) {
-		// Sicherheitscheck: Nur speichern wenn erlaubt
+	if ( isset( $_POST['thw_save_participation'] ) && check_admin_referer( 'thw_save_participation_nonce' ) ) {
+		
+		if ( ! $can_edit ) {
+			// Wenn geschlossen, aber AJAX Request -> Fehler senden
+			if ( ! empty( $_SERVER['HTTP_X_REQUESTED_WITH'] ) && strtolower( $_SERVER['HTTP_X_REQUESTED_WITH'] ) == 'xmlhttprequest' ) {
+				ob_clean();
+				wp_send_json_error( 'Dienst ist abgeschlossen. Änderungen wurden nicht gespeichert.' );
+			}
+		} else {
+			// Sicherheitscheck: Nur speichern wenn erlaubt
 		
 		$service_id = intval( $_POST['service_id'] );
 		$posted_filter_zug = isset( $_POST['filter_zug'] ) ? sanitize_text_field( $_POST['filter_zug'] ) : '';
@@ -136,14 +158,7 @@ function thw_dm_participation_shortcode() {
 
 		echo '<div class="thw-msg success" style="background: #d4edda; color: #155724; padding: 10px; margin-bottom: 15px; border: 1px solid #c3e6cb; border-radius: 3px;">Anwesenheit gespeichert.</div>';
 		$selected_service_id = $service_id; // Auswahl beibehalten
-	}
-	
-	// --- STATUS ÄNDERN (Admin) ---
-	if ( isset( $_POST['thw_dm_status_action'] ) && $is_admin && check_admin_referer( 'thw_dm_status_nonce' ) ) {
-		$new_status = $_POST['thw_dm_status_action'] === 'close' ? 'closed' : 'open';
-		$wpdb->update( $table_services, array( 'status' => $new_status ), array( 'id' => $selected_service_id ) );
-		$service_status = $new_status;
-		$can_edit = $service_status !== 'closed'; // Status update
+		}
 	}
 
 	// Dienste laden
@@ -185,11 +200,16 @@ function thw_dm_participation_shortcode() {
 	} );
 
 	$user_unit_map = array();
+	$vegetarian_map = array(); // Map Name -> IsVegetarian
 	foreach ( $all_users as $u ) { 
 		$lastname = $u->last_name;
 		$firstname = $u->first_name;
 		$fullname = ! empty( $lastname ) ? $lastname . ( ! empty( $firstname ) ? ', ' . $firstname : '' ) : $u->display_name;
 		$user_unit_map[ $fullname ] = get_user_meta( $u->ID, 'thw_unit_id', true ); 
+		
+		if ( get_user_meta( $u->ID, 'thw_vegetarian', true ) === '1' ) {
+			$vegetarian_map[ $fullname ] = true;
+		}
 	}
 
 	?>
@@ -265,6 +285,7 @@ function thw_dm_participation_shortcode() {
 					<form method="post">
 						<?php wp_nonce_field( 'thw_dm_status_nonce' ); ?>
 						<input type="hidden" name="service_id" value="<?php echo $selected_service_id; ?>">
+						<input type="hidden" name="filter_zug" value="<?php echo esc_attr( $filter_zug ); ?>">
 						<?php if ( $service_status === 'closed' ) : ?>
 							<strong>Status: Abgeschlossen.</strong> Führungskräfte können nicht mehr bearbeiten. 
 							<button type="submit" name="thw_dm_status_action" value="open" class="thw-btn" style="background:#444; font-size:0.9em; margin-left:10px;">Wieder öffnen</button>
@@ -324,9 +345,13 @@ function thw_dm_participation_shortcode() {
 
 			// Summe der Anwesenden berechnen
 			$total_present = 0;
-			foreach ( $saved_attendance as $status ) {
+			$total_vegetarian = 0;
+			foreach ( $saved_attendance as $name => $status ) {
 				if ( $status === 'present' ) {
 					$total_present++;
+					if ( isset( $vegetarian_map[ $name ] ) ) {
+						$total_vegetarian++;
+					}
 				}
 			}
 
@@ -350,7 +375,8 @@ function thw_dm_participation_shortcode() {
 			}
 			?>
 			<div class="thw-card" style="text-align:center; font-size:1.2em; padding:15px; border-left:5px solid #003399;">
-				<strong>Gesamtstärke (Anwesend): <span id="total-present-count"><?php echo intval( $total_present ); ?></span> / <?php echo intval( $max_strength ); ?></strong>
+				<strong>Gesamtstärke (Anwesend): <span id="total-present-count"><?php echo intval( $total_present ); ?></span> / <?php echo intval( $max_strength ); ?>
+				<br><span style="font-size:0.8em; font-weight:normal; color:#28a745;">Davon Vegetarier: <?php echo intval( $total_vegetarian ); ?> &#127811;</span></strong>
 			</div>
 
 			<?php
@@ -415,12 +441,15 @@ function thw_dm_participation_shortcode() {
 											
 											$current_status = isset( $saved_attendance[ $fullname ] ) ? $saved_attendance[ $fullname ] : '';
 											$displayed_names[] = $fullname;
+
+											$is_veg = get_user_meta( $user->ID, 'thw_vegetarian', true ) === '1';
+											$veg_icon = $is_veg ? ' <span title="Vegetarier" style="color:#28a745; cursor:help;">&#127811;</span>' : '';
 										?>
 										<tr style="<?php echo $is_absent ? 'background-color:#fff5f5;' : ''; ?>">
-											<td><?php echo esc_html( $fullname ); ?></td>
+											<td><?php echo esc_html( $fullname ) . $veg_icon; ?></td>
 											<td><?php echo $status_html; ?></td>
 											<td style="text-align:left; white-space:nowrap;">
-												<label class="thw-radio-wrapper" title="Anwesend"><input type="radio" name="attendance[<?php echo $user->ID; ?>]" value="present" <?php checked( $current_status, 'present' ); ?> <?php disabled( ! $can_edit ); ?>><span class="thw-icon status-present">X</span></label>
+												<label class="thw-radio-wrapper" title="Anwesend"><input type="radio" name="attendance[<?php echo $user->ID; ?>]" value="present" <?php checked( $current_status, 'present' ); ?> <?php disabled( ! $can_edit ); ?>><span class="thw-icon status-present">&#10004;</span></label>
 												<label class="thw-radio-wrapper" title="Entschuldigt"><input type="radio" name="attendance[<?php echo $user->ID; ?>]" value="leave" <?php checked( $current_status, 'leave' ); ?> <?php disabled( ! $can_edit ); ?>><span class="thw-icon status-leave">E</span></label>
 												<label class="thw-radio-wrapper" title="Krank"><input type="radio" name="attendance[<?php echo $user->ID; ?>]" value="sick" <?php checked( $current_status, 'sick' ); ?> <?php disabled( ! $can_edit ); ?>><span class="thw-icon status-sick">K</span></label>
 												<label class="thw-radio-wrapper" title="Unentschuldigt"><input type="radio" name="attendance[<?php echo $user->ID; ?>]" value="unexcused" <?php checked( $current_status, 'unexcused' ); ?> <?php disabled( ! $can_edit ); ?>><span class="thw-icon status-unexcused">U</span></label>
@@ -467,14 +496,17 @@ function thw_dm_participation_shortcode() {
 													$extra_info = '<br><span style="font-size:0.85em; color:#666;">(Keine Einheit zugeordnet)</span>';
 												}
 											}
+
+											$is_veg = isset( $vegetarian_map[ $name ] );
+											$veg_icon = $is_veg ? ' <span title="Vegetarier" style="color:#28a745; cursor:help;">&#127811;</span>' : '';
 										?>
 										<tr>
 											<td>
-												<?php echo esc_html( $name ); ?>
+												<?php echo esc_html( $name ) . $veg_icon; ?>
 												<?php echo $extra_info; ?>
 											</td>
 											<td style="text-align:left; white-space:nowrap;">
-												<label class="thw-radio-wrapper" title="Anwesend"><input type="radio" name="attendance_manual[<?php echo esc_attr( $name ); ?>]" value="present" <?php checked( $status, 'present' ); ?> <?php disabled( ! $can_edit ); ?>><span class="thw-icon status-present">X</span></label>
+												<label class="thw-radio-wrapper" title="Anwesend"><input type="radio" name="attendance_manual[<?php echo esc_attr( $name ); ?>]" value="present" <?php checked( $status, 'present' ); ?> <?php disabled( ! $can_edit ); ?>><span class="thw-icon status-present">&#10004;</span></label>
 												<label class="thw-radio-wrapper" title="Entschuldigt"><input type="radio" name="attendance_manual[<?php echo esc_attr( $name ); ?>]" value="leave" <?php checked( $status, 'leave' ); ?> <?php disabled( ! $can_edit ); ?>><span class="thw-icon status-leave">E</span></label>
 												<label class="thw-radio-wrapper" title="Krank"><input type="radio" name="attendance_manual[<?php echo esc_attr( $name ); ?>]" value="sick" <?php checked( $status, 'sick' ); ?> <?php disabled( ! $can_edit ); ?>><span class="thw-icon status-sick">K</span></label>
 												<label class="thw-radio-wrapper" title="Unentschuldigt"><input type="radio" name="attendance_manual[<?php echo esc_attr( $name ); ?>]" value="unexcused" <?php checked( $status, 'unexcused' ); ?> <?php disabled( ! $can_edit ); ?>><span class="thw-icon status-unexcused">U</span></label>
@@ -600,7 +632,7 @@ function thw_dm_participation_shortcode() {
 											setTimeout(function() { toast.style.display = 'none'; }, 2000);
 										}
 									} else {
-										toast.innerText = 'Fehler';
+										toast.innerText = data.data || 'Fehler';
 										toast.style.backgroundColor = '#dc3545';
 										setTimeout(function() { toast.style.display = 'none'; }, 3000);
 									}

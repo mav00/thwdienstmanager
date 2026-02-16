@@ -352,6 +352,12 @@ function thw_dm_users_page_html() {
 		if ( isset( $_POST['user_unit'] ) && is_array( $_POST['user_unit'] ) ) {
 			foreach ( $_POST['user_unit'] as $user_id => $unit_id ) {
 				update_user_meta( $user_id, 'thw_unit_id', intval( $unit_id ) );
+
+				$is_veg = isset( $_POST['user_vegetarian'][ $user_id ] ) ? '1' : '0';
+				update_user_meta( $user_id, 'thw_vegetarian', $is_veg );
+
+				$func = isset( $_POST['user_function'][ $user_id ] ) ? sanitize_key( $_POST['user_function'][ $user_id ] ) : 'helfer';
+				update_user_meta( $user_id, 'thw_user_function', $func );
 			}
 			echo '<div class="updated"><p>' . esc_html__( 'Benutzerzuordnungen gespeichert.', 'thw-dienst-manager' ) . '</p></div>';
 		}
@@ -387,6 +393,8 @@ function thw_dm_users_page_html() {
 						<th>Benutzername</th>
 						<th>Anzeigename</th>
 						<th>Zugeordnete Einheit</th>
+						<th>Funktion</th>
+						<th>Vegetarier</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -399,6 +407,9 @@ function thw_dm_users_page_html() {
 						if ( ! empty( $lastname ) ) {
 							$fullname = $lastname . ( ! empty( $firstname ) ? ', ' . $firstname : '' );
 						}
+						$is_veg = get_user_meta( $user->ID, 'thw_vegetarian', true );
+						$func = get_user_meta( $user->ID, 'thw_user_function', true );
+						if ( empty( $func ) ) $func = 'helfer';
 					?>
 						<tr>
 							<td><?php echo esc_html( $user->user_login ); ?></td>
@@ -412,6 +423,16 @@ function thw_dm_users_page_html() {
 										</option>
 									<?php endforeach; ?>
 								</select>
+							</td>
+							<td>
+								<select name="user_function[<?php echo $user->ID; ?>]">
+									<option value="helfer" <?php selected( $func, 'helfer' ); ?>>Helfer</option>
+									<option value="unterfuehrer" <?php selected( $func, 'unterfuehrer' ); ?>>Unterführer</option>
+									<option value="fuehrung" <?php selected( $func, 'fuehrung' ); ?>>Führungskraft</option>
+								</select>
+							</td>
+							<td style="text-align:center;">
+								<input type="checkbox" name="user_vegetarian[<?php echo $user->ID; ?>]" value="1" <?php checked( $is_veg, '1' ); ?>>
 							</td>
 						</tr>
 					<?php endforeach; ?>

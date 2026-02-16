@@ -21,9 +21,21 @@ function thw_dm_frontend_shortcode() {
 	$selected_service_id = isset( $_REQUEST['service_id'] ) ? intval( $_REQUEST['service_id'] ) : 0;
 	$filter_zug = isset( $_REQUEST['filter_zug'] ) ? sanitize_text_field( $_REQUEST['filter_zug'] ) : '';
 
+	// Status vorab laden, um Speicher-Logik abzusichern
+	$service_status = 'open';
+	$current_service = null;
+	if ( $selected_service_id > 0 ) {
+		$current_service = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $table_services WHERE id = %d", $selected_service_id ) );
+		if ( $current_service ) {
+			$service_status = isset( $current_service->status ) ? $current_service->status : 'open';
+		}
+	}
+	$can_edit = $service_status !== 'closed';
+
 	// --- SPEICHERN LOGIK ---
 	if ( isset( $_POST['thw_dm_save_details_nonce'] ) && wp_verify_nonce( $_POST['thw_dm_save_details_nonce'], 'save_service_details' ) ) {
-		if ( $selected_service_id > 0 && isset( $_POST['details'] ) && is_array( $_POST['details'] ) ) {
+		// Prüfung auf $can_edit hinzugefügt
+		if ( $selected_service_id > 0 && isset( $_POST['details'] ) && is_array( $_POST['details'] ) && $can_edit ) {
 			
 			// Lösch-Logik abhängig vom Filter
 			if ( ! empty( $filter_zug ) ) {
@@ -116,10 +128,8 @@ function thw_dm_frontend_shortcode() {
 		</div>
 
 		<?php if ( $selected_service_id > 0 ) : 
-			$current_service = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $table_services WHERE id = %d", $selected_service_id ) );
-			
 			// Status-Logik
-			$service_status = isset( $current_service->status ) ? $current_service->status : 'open';
+			// $service_status wurde bereits oben geladen
 			$is_admin = current_user_can( 'administrator' );
 			
 			// Status ändern (Nur Admin)
@@ -127,10 +137,9 @@ function thw_dm_frontend_shortcode() {
 				$new_status = $_POST['thw_dm_status_action'] === 'close' ? 'closed' : 'open';
 				$wpdb->update( $table_services, array( 'status' => $new_status ), array( 'id' => $selected_service_id ) );
 				$service_status = $new_status;
+				$can_edit = $service_status !== 'closed'; // Status aktualisieren
 				echo '<div class="thw-message success">Status geändert: ' . ($new_status == 'closed' ? 'Abgeschlossen' : 'Geöffnet') . '</div>';
 			}
-
-			$can_edit = $service_status !== 'closed';
 
 			// Einheiten dieses Dienstes ermitteln
 			$assigned_unit_ids = maybe_unserialize( $current_service->unit_ids );
