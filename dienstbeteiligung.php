@@ -200,6 +200,7 @@ function thw_dm_participation_shortcode() {
 	} );
 
 	$user_unit_map = array();
+	$user_function_map = array();
 	$vegetarian_map = array(); // Map Name -> IsVegetarian
 	foreach ( $all_users as $u ) { 
 		$lastname = $u->last_name;
@@ -207,6 +208,9 @@ function thw_dm_participation_shortcode() {
 		$fullname = ! empty( $lastname ) ? $lastname . ( ! empty( $firstname ) ? ', ' . $firstname : '' ) : $u->display_name;
 		$user_unit_map[ $fullname ] = get_user_meta( $u->ID, 'thw_unit_id', true ); 
 		
+		$func = get_user_meta( $u->ID, 'thw_user_function', true );
+		$user_function_map[ $fullname ] = ! empty( $func ) ? $func : 'helfer';
+
 		if ( get_user_meta( $u->ID, 'thw_vegetarian', true ) === '1' ) {
 			$vegetarian_map[ $fullname ] = true;
 		}
@@ -344,11 +348,18 @@ function thw_dm_participation_shortcode() {
 			}
 
 			// Summe der Anwesenden berechnen
-			$total_present = 0;
+			$stats_global = array( 'fuehrung' => 0, 'unterfuehrer' => 0, 'helfer' => 0, 'total' => 0 );
 			$total_vegetarian = 0;
 			foreach ( $saved_attendance as $name => $status ) {
 				if ( $status === 'present' ) {
-					$total_present++;
+					$func = isset( $user_function_map[ $name ] ) ? $user_function_map[ $name ] : 'helfer';
+					if ( isset( $stats_global[ $func ] ) ) {
+						$stats_global[ $func ]++;
+					} else {
+						$stats_global['helfer']++;
+					}
+					$stats_global['total']++;
+
 					if ( isset( $vegetarian_map[ $name ] ) ) {
 						$total_vegetarian++;
 					}
@@ -357,6 +368,7 @@ function thw_dm_participation_shortcode() {
 
 			// Maximale Stärke berechnen (Alle Helfer der beteiligten Einheiten minus Abwesende)
 			$max_strength = 0;
+			$absent_ids = array();
 			if ( ! empty( $unit_ids ) && is_array( $unit_ids ) ) {
 				$service_users_ids = get_users( array( 
 					'meta_key' => 'thw_unit_id', 
@@ -373,10 +385,53 @@ function thw_dm_participation_shortcode() {
 					$max_strength = count( array_diff( $service_users_ids, $absent_ids ) );
 				}
 			}
+
+			// Stärke pro Einheit vorberechnen für die Box oben
+			$unit_stats_list = array();
+			if ( ! empty( $unit_ids ) && is_array( $unit_ids ) ) {
+				foreach ( $unit_ids as $uid ) {
+					$u_obj = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $table_units WHERE id = %d", $uid ) );
+					if ( ! $u_obj ) continue;
+					if ( ! empty( $filter_zug ) && $u_obj->zug !== $filter_zug ) continue;
+
+					$u_users = get_users( array( 'meta_key' => 'thw_unit_id', 'meta_value' => $uid ) );
+					
+					$u_stats = array( 'fuehrung' => 0, 'unterfuehrer' => 0, 'helfer' => 0, 'total' => 0 );
+					$u_max = 0;
+					foreach ( $u_users as $user_obj ) {
+						if ( ! in_array( $user_obj->ID, $absent_ids ) ) $u_max++;
+
+						$u_fullname = ! empty( $user_obj->last_name ) ? $user_obj->last_name . ( ! empty( $user_obj->first_name ) ? ', ' . $user_obj->first_name : '' ) : $user_obj->display_name;
+						
+						if ( isset( $saved_attendance[ $u_fullname ] ) && $saved_attendance[ $u_fullname ] === 'present' ) {
+							$u_func = isset( $user_function_map[ $u_fullname ] ) ? $user_function_map[ $u_fullname ] : 'helfer';
+							if ( isset( $u_stats[ $u_func ] ) ) $u_stats[ $u_func ]++;
+							else $u_stats['helfer']++;
+							$u_stats['total']++;
+						}
+					}
+					$unit_stats_list[] = array( 'name' => $u_obj->zug . ' - ' . $u_obj->bezeichnung, 'stats' => $u_stats, 'max' => $u_max );
+				}
+			}
 			?>
 			<div class="thw-card" style="text-align:center; font-size:1.2em; padding:15px; border-left:5px solid #003399;">
-				<strong>Gesamtstärke (Anwesend): <span id="total-present-count"><?php echo intval( $total_present ); ?></span> / <?php echo intval( $max_strength ); ?>
-				<br><span style="font-size:0.8em; font-weight:normal; color:#28a745;">Davon Vegetarier: <?php echo intval( $total_vegetarian ); ?> &#127811;</span></strong>
+				<strong>Gesamtstärke: 
+				<?php echo intval( $stats_global['fuehrung'] ); ?> / <?php echo intval( $stats_global['unterfuehrer'] ); ?> / <?php echo intval( $stats_global['helfer'] ); ?> = <span id="total-present-count"><?php echo intval( $stats_global['total'] ); ?></span> (Max: <?php echo intval( $max_strength ); ?>)
+				<br>
+				<span style="font-size:0.7em; color:#666; font-weight:normal;">(Führung / Unterführer / Helfer / Gesamt)</span>
+				<br><span style="font-size:0.8em; font-weight:normal; color:#28a745;">Davon Vegetarier: <?php echo intval( $total_vegetarian ); ?> &#127811;</span>
+				</strong>
+				<?php if ( ! empty( $unit_stats_list ) ) : ?>
+					<hr style="margin:10px 0; border:0; border-top:1px solid #eee;">
+					<div style="font-size:0.85em; text-align:left; display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:10px;">
+						<?php foreach ( $unit_stats_list as $us ) : ?>
+							<div>
+								<strong><?php echo esc_html( $us['name'] ); ?>:</strong><br>
+								<?php echo intval( $us['stats']['fuehrung'] ); ?> / <?php echo intval( $us['stats']['unterfuehrer'] ); ?> / <?php echo intval( $us['stats']['helfer'] ); ?> = <?php echo intval( $us['stats']['total'] ); ?> (Max: <?php echo intval( $us['max'] ); ?>)
+							</div>
+						<?php endforeach; ?>
+					</div>
+				<?php endif; ?>
 			</div>
 
 			<?php
@@ -411,10 +466,11 @@ function thw_dm_participation_shortcode() {
 							}
 							return $res;
 						} );
+
 						?>
 						
 						<div class="thw-card" style="border-left: 5px solid #003399;">
-							<h3 style="margin-top:0;"><?php echo esc_html( $unit->zug . ' - ' . $unit->bezeichnung ); ?></h3>
+							<h3 style="margin-top:0; margin-bottom:5px;"><?php echo esc_html( $unit->zug . ' - ' . $unit->bezeichnung ); ?></h3>
 							
 							<?php if ( empty( $users ) ) : ?>
 								<p>Keine Helfer in dieser Einheit.</p>
