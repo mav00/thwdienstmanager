@@ -65,8 +65,8 @@ function thw_dm_frontend_shortcode() {
 			foreach ( $_POST['details'] as $unit_id => $entries ) {
 				if ( is_array( $entries ) ) {
 					foreach ( $entries as $entry ) {
-						// Leere Zeilen überspringen (wenn Thema leer ist)
-						if ( empty( trim( $entry['topic'] ) ) ) continue;
+						// Leere Zeilen überspringen (nur wenn alles leer ist)
+						if ( empty( trim( $entry['topic'] ) ) && empty( trim( $entry['goal'] ) ) && empty( $entry['duration'] ) ) continue;
 
 						$wpdb->insert(
 							$table_details,
@@ -217,15 +217,15 @@ function thw_dm_frontend_shortcode() {
 									<div class="thw-entry-row">
 										<div class="thw-field" style="flex-basis: 100%;">
 											<label>Ausbildungsthema</label>
-											<textarea name="details[<?php echo $uid; ?>][<?php echo $row_index; ?>][topic]" rows="3" required placeholder="Was wird gemacht?" <?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $entry->topic ); ?></textarea>
+											<textarea name="details[<?php echo $uid; ?>][<?php echo $row_index; ?>][topic]" rows="3" placeholder="Was wird gemacht?" <?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $entry->topic ); ?></textarea>
 										</div>
 										<div class="thw-field" style="flex-basis: 100%;">
 											<label>Ziel der Ausbildung</label>
-											<textarea name="details[<?php echo $uid; ?>][<?php echo $row_index; ?>][goal]" rows="3" required placeholder="Lernziel" <?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $entry->goal ); ?></textarea>
+											<textarea name="details[<?php echo $uid; ?>][<?php echo $row_index; ?>][goal]" rows="3" placeholder="Lernziel" <?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $entry->goal ); ?></textarea>
 										</div>
 										<div class="thw-field" style="flex: 0 0 100px;">
 											<label>Dauer (Min)</label>
-											<input type="number" name="details[<?php echo $uid; ?>][<?php echo $row_index; ?>][duration]" value="<?php echo esc_attr( $entry->duration ); ?>" required <?php disabled( ! $can_edit ); ?>>
+											<input type="number" name="details[<?php echo $uid; ?>][<?php echo $row_index; ?>][duration]" value="<?php echo esc_attr( $entry->duration ); ?>" <?php disabled( ! $can_edit ); ?>>
 										</div>
 										<div class="thw-field" style="flex: 1;">
 											<label>Lernabschnitt (Optional)</label>
@@ -261,15 +261,15 @@ function thw_dm_frontend_shortcode() {
 							<div class="thw-entry-row">
 								<div class="thw-field" style="flex-basis: 100%;">
 									<label>Ausbildungsthema</label>
-									<textarea name="details[${unitId}][${index}][topic]" rows="3" required placeholder="Was wird gemacht?"></textarea>
+									<textarea name="details[${unitId}][${index}][topic]" rows="3" placeholder="Was wird gemacht?"></textarea>
 								</div>
 								<div class="thw-field" style="flex-basis: 100%;">
 									<label>Ziel der Ausbildung</label>
-									<textarea name="details[${unitId}][${index}][goal]" rows="3" required placeholder="Lernziel"></textarea>
+									<textarea name="details[${unitId}][${index}][goal]" rows="3" placeholder="Lernziel"></textarea>
 								</div>
 								<div class="thw-field" style="flex: 0 0 100px;">
 									<label>Dauer (Min)</label>
-									<input type="number" name="details[${unitId}][${index}][duration]" required>
+									<input type="number" name="details[${unitId}][${index}][duration]">
 								</div>
 								<div class="thw-field" style="flex: 1;">
 									<label>Lernabschnitt (Optional)</label>
