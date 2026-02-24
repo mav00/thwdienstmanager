@@ -11,6 +11,7 @@ function thw_dm_evaluation_shortcode() {
 	global $wpdb;
 	$table_services = $wpdb->prefix . 'thw_services';
 	$table_units    = $wpdb->prefix . 'thw_units';
+	$table_details  = $wpdb->prefix . 'thw_service_details';
 
 	$page_url = add_query_arg( 'view', 'evaluation', get_permalink() );
 	
@@ -29,6 +30,8 @@ function thw_dm_evaluation_shortcode() {
 		}
 	}
 	$filter_zug = isset( $_REQUEST['filter_zug'] ) ? sanitize_text_field( $_REQUEST['filter_zug'] ) : $default_zug;
+	$filter_unit = isset( $_REQUEST['filter_unit'] ) ? intval( $_REQUEST['filter_unit'] ) : 0;
+	$eval_type = isset( $_REQUEST['eval_type'] ) ? sanitize_key( $_REQUEST['eval_type'] ) : 'participation';
 
 	ob_start();
 
@@ -48,6 +51,21 @@ function thw_dm_evaluation_shortcode() {
 		$unit_map[ $u->id ] = $u->zug . ' - ' . $u->bezeichnung;
 	}
 
+	// Einheiten für Dropdown filtern (passend zum Zug)
+	$units_dropdown = $all_units;
+	if ( ! empty( $filter_zug ) ) {
+		$units_dropdown = array_filter( $all_units, function($u) use ($filter_zug) {
+			return $u->zug === $filter_zug;
+		});
+	}
+	// Validierung: Wenn gewählte Einheit nicht im Zug ist, Reset
+	if ( $filter_unit > 0 ) {
+		$valid_ids = array_map( function($u){ return $u->id; }, $units_dropdown );
+		if ( ! in_array( $filter_unit, $valid_ids ) ) {
+			$filter_unit = 0;
+		}
+	}
+
 	// 3. Dienste laden (gefiltert nach Jahr)
 	$sql_services = "SELECT * FROM $table_services WHERE YEAR(service_date) = %d ORDER BY service_date ASC";
 	$services_raw = $wpdb->get_results( $wpdb->prepare( $sql_services, $filter_year ) );
@@ -58,7 +76,16 @@ function thw_dm_evaluation_shortcode() {
 	
 	if ( ! empty( $filter_zug ) ) {
 		$zug_unit_ids = $wpdb->get_col( $wpdb->prepare( "SELECT id FROM $table_units WHERE zug = %s", $filter_zug ) );
-		
+	}
+
+	if ( $filter_unit > 0 ) {
+		foreach ( $services_raw as $s ) {
+			$s_units = maybe_unserialize( $s->unit_ids );
+			if ( is_array( $s_units ) && in_array( $filter_unit, $s_units ) ) {
+				$services[] = $s;
+			}
+		}
+	} elseif ( ! empty( $filter_zug ) ) {
 		foreach ( $services_raw as $s ) {
 			$s_units = maybe_unserialize( $s->unit_ids );
 			// Wenn der Dienst Einheiten dieses Zugs enthält, anzeigen
@@ -72,7 +99,10 @@ function thw_dm_evaluation_shortcode() {
 
 	// 4. Benutzer laden
 	$user_args = array();
-	if ( ! empty( $filter_zug ) && ! empty( $zug_unit_ids ) ) {
+	if ( $filter_unit > 0 ) {
+		$user_args['meta_key'] = 'thw_unit_id';
+		$user_args['meta_value'] = $filter_unit;
+	} elseif ( ! empty( $filter_zug ) && ! empty( $zug_unit_ids ) ) {
 		$user_args['meta_key']     = 'thw_unit_id';
 		$user_args['meta_value']   = $zug_unit_ids;
 		$user_args['meta_compare'] = 'IN';
@@ -121,6 +151,13 @@ function thw_dm_evaluation_shortcode() {
 				<input type="hidden" name="view" value="evaluation">
 				<div class="thw-flex">
 					<div class="thw-col">
+						<label for="eval_type">Auswertungstyp:</label>
+						<select name="eval_type" id="eval_type" onchange="this.form.submit()">
+							<option value="participation" <?php selected( $eval_type, 'participation' ); ?>>Dienstbeteiligung</option>
+							<option value="topics" <?php selected( $eval_type, 'topics' ); ?>>Ausbildungsthemen</option>
+						</select>
+					</div>
+					<div class="thw-col">
 						<label for="filter_zug">Zug auswählen:</label>
 						<select name="filter_zug" id="filter_zug" onchange="this.form.submit()">
 							<option value="">-- Alle Züge --</option>
@@ -128,6 +165,15 @@ function thw_dm_evaluation_shortcode() {
 								<option value="<?php echo esc_attr( $z ); ?>" <?php selected( $filter_zug, $z ); ?>>
 									<?php echo esc_html( $z ); ?>
 								</option>
+							<?php endforeach; ?>
+						</select>
+					</div>
+					<div class="thw-col">
+						<label for="filter_unit">Gruppe/Einheit:</label>
+						<select name="filter_unit" id="filter_unit" onchange="this.form.submit()">
+							<option value="0">-- Alle --</option>
+							<?php foreach ( $units_dropdown as $u ) : ?>
+								<option value="<?php echo $u->id; ?>" <?php selected( $filter_unit, $u->id ); ?>><?php echo esc_html( $u->bezeichnung ); ?></option>
 							<?php endforeach; ?>
 						</select>
 					</div>
@@ -147,11 +193,12 @@ function thw_dm_evaluation_shortcode() {
 
 		<!-- TABELLE -->
 		<div class="thw-card" style="padding: 0; overflow: hidden;">
-			<?php if ( empty( $services ) ) : ?>
-				<div style="padding: 20px;">Keine Dienste für die gewählte Auswahl gefunden.</div>
-			<?php elseif ( empty( $users ) ) : ?>
-				<div style="padding: 20px;">Keine Helfer gefunden.</div>
-			<?php else : ?>
+			<?php if ( $eval_type === 'participation' ) : ?>
+				<?php if ( empty( $services ) ) : ?>
+					<div style="padding: 20px;">Keine Dienste für die gewählte Auswahl gefunden.</div>
+				<?php elseif ( empty( $users ) ) : ?>
+					<div style="padding: 20px;">Keine Helfer gefunden.</div>
+				<?php else : ?>
 				<div class="thw-table-wrapper" style="overflow-x: auto; max-width: 100%;">
 					<table class="thw-eval-table" style="width: max-content; min-width: 100%; border-collapse: collapse;">
 						<thead>
@@ -226,6 +273,93 @@ function thw_dm_evaluation_shortcode() {
 					<span style="display:inline-block; width:15px; text-align:center; background:#fff3cd; color:#856404; border:1px solid #ccc; margin-left:10px;">K</span> Krank
 					<span style="display:inline-block; width:15px; text-align:center; background:#dc3545; color:#fff; border:1px solid #ccc; margin-left:10px;">U</span> Unentschuldigt
 				</div>
+				<?php endif; ?>
+			<?php elseif ( $eval_type === 'topics' ) : ?>
+				<?php
+				if ( empty( $services ) ) {
+					echo '<div style="padding: 20px;">Keine Dienste für die gewählte Auswahl gefunden.</div>';
+				} else {
+					$service_ids = wp_list_pluck( $services, 'id' );
+					$details_by_unit = array();
+					$total_duration_by_unit = array();
+
+					if ( ! empty( $service_ids ) ) {
+						$placeholders = implode( ',', array_fill( 0, count( $service_ids ), '%d' ) );
+						
+						$sql_details = "SELECT d.*, s.service_date, s.name as service_name 
+										FROM $table_details d 
+										JOIN $table_services s ON s.id = d.service_id 
+										WHERE d.service_id IN ($placeholders) 
+										ORDER BY s.service_date ASC, d.topic ASC";
+						
+						$all_details = $wpdb->get_results( $wpdb->prepare( $sql_details, $service_ids ) );
+
+						foreach ( $all_details as $detail ) {
+							$details_by_unit[ $detail->unit_id ][] = $detail;
+							if ( ! isset( $total_duration_by_unit[ $detail->unit_id ] ) ) {
+								$total_duration_by_unit[ $detail->unit_id ] = 0;
+							}
+							$total_duration_by_unit[ $detail->unit_id ] += intval( $detail->duration );
+						}
+					}
+
+					// Einheiten zum Anzeigen bestimmen
+					$units_to_display = array();
+					if ( $filter_unit > 0 ) {
+						if ( isset( $unit_map[ $filter_unit ] ) ) {
+							$units_to_display[ $filter_unit ] = $unit_map[ $filter_unit ];
+						}
+					} elseif ( ! empty( $filter_zug ) ) {
+						foreach ( $zug_unit_ids as $unit_id ) {
+							if ( isset( $unit_map[ $unit_id ] ) ) $units_to_display[ $unit_id ] = $unit_map[ $unit_id ];
+						}
+					} else {
+						$units_to_display = $unit_map;
+					}
+
+					if ( empty( $details_by_unit ) ) {
+						echo '<div style="padding: 20px;">Keine Ausbildungsthemen für die gewählte Auswahl gefunden.</div>';
+					} else {
+						?>
+						<style>
+							.thw-topics-table { width:100%; border-collapse: collapse; margin-top: 15px; font-size: 0.9em; }
+							.thw-topics-table th, .thw-topics-table td { text-align: left; padding: 8px; border: 1px solid #ddd; vertical-align: top; }
+							.thw-topics-table th { background-color: #f2f2f2; font-weight: bold; }
+							.thw-unit-topics-wrapper { padding: 15px; }
+							.thw-unit-topics-wrapper:not(:last-child) { border-bottom: 2px solid #ccc; }
+						</style>
+						<?php
+						foreach ( $units_to_display as $unit_id => $unit_name ) {
+							if ( isset( $details_by_unit[ $unit_id ] ) ) {
+								$unit_details = $details_by_unit[ $unit_id ];
+								$total_duration_h = isset( $total_duration_by_unit[ $unit_id ] ) ? round( $total_duration_by_unit[ $unit_id ] / 60, 1 ) : 0;
+								?>
+								<div class="thw-unit-topics-wrapper">
+									<h3 style="margin-top:0; margin-bottom: 5px;"><?php echo esc_html( $unit_name ); ?></h3>
+									<p style="margin-top:0; font-size: 0.9em;"><strong>Gesamtdauer im Jahr <?php echo esc_html( $filter_year ); ?>: <?php echo esc_html( $total_duration_h ); ?> Stunden</strong></p>
+									<div class="thw-table-wrapper" style="overflow-x: auto; max-width: 100%;">
+										<table class="thw-topics-table">
+											<thead><tr><th style="width:20%;">Datum / Dienst</th><th style="width:30%;">Ausbildungsthema</th><th style="width:30%;">Lernziel</th><th style="width:10%;">Lernabschnitt</th><th style="width:10%;">Dauer (Min)</th></tr></thead>
+											<tbody>
+												<?php foreach ( $unit_details as $detail ) : ?>
+													<tr>
+														<td><?php echo date_i18n( 'd.m.Y', strtotime( $detail->service_date ) ); ?><br><small><?php echo esc_html( $detail->service_name ); ?></small></td>
+														<td><?php echo nl2br( esc_html( $detail->topic ) ); ?></td>
+														<td><?php echo nl2br( esc_html( $detail->goal ) ); ?></td>
+														<td><?php echo esc_html( $detail->section ); ?></td>
+														<td style="text-align:center;"><?php echo esc_html( $detail->duration ); ?></td>
+													</tr>
+												<?php endforeach; ?>
+											</tbody>
+										</table>
+									</div>
+								</div>
+								<?php
+							}
+						}
+					}
+				}
+				?>
 			<?php endif; ?>
 		</div>
 	</div>
