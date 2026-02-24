@@ -53,7 +53,17 @@ function thw_dm_absences_shortcode() {
 
 	// --- DATEN LADEN ---
 	// Filter-Status
-	$filter_zug = isset( $_REQUEST['filter_zug'] ) ? sanitize_text_field( $_REQUEST['filter_zug'] ) : '';
+	// Default Zug ermitteln
+	$default_zug = '';
+	$curr_user_id = get_current_user_id();
+	if ( $curr_user_id ) {
+		$u_uid = get_user_meta( $curr_user_id, 'thw_unit_id', true );
+		if ( $u_uid ) {
+			$u_unit = $wpdb->get_row( $wpdb->prepare( "SELECT zug FROM $table_units WHERE id = %d", $u_uid ) );
+			if ( $u_unit ) $default_zug = $u_unit->zug;
+		}
+	}
+	$filter_zug = isset( $_REQUEST['filter_zug'] ) ? sanitize_text_field( $_REQUEST['filter_zug'] ) : $default_zug;
 	$filter_unit_id = isset( $_REQUEST['filter_unit'] ) ? intval( $_REQUEST['filter_unit'] ) : 0;
 	$selected_user_id = isset( $_REQUEST['selected_user'] ) ? intval( $_REQUEST['selected_user'] ) : 0;
 	$filter_submitted = isset( $_REQUEST['filter_submitted'] );

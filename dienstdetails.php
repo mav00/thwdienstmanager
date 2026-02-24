@@ -19,7 +19,18 @@ function thw_dm_frontend_shortcode() {
 
 	// 1. Dienst auswählen oder aus Post-Daten holen
 	$selected_service_id = isset( $_REQUEST['service_id'] ) ? intval( $_REQUEST['service_id'] ) : 0;
-	$filter_zug = isset( $_REQUEST['filter_zug'] ) ? sanitize_text_field( $_REQUEST['filter_zug'] ) : '';
+	
+	// Default Zug ermitteln
+	$default_zug = '';
+	$curr_user_id = get_current_user_id();
+	if ( $curr_user_id ) {
+		$u_uid = get_user_meta( $curr_user_id, 'thw_unit_id', true );
+		if ( $u_uid ) {
+			$u_unit = $wpdb->get_row( $wpdb->prepare( "SELECT zug FROM $table_units WHERE id = %d", $u_uid ) );
+			if ( $u_unit ) $default_zug = $u_unit->zug;
+		}
+	}
+	$filter_zug = isset( $_REQUEST['filter_zug'] ) ? sanitize_text_field( $_REQUEST['filter_zug'] ) : $default_zug;
 
 	// Status vorab laden, um Speicher-Logik abzusichern
 	$service_status = 'open';
